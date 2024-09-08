@@ -1,5 +1,5 @@
 use anyhow::Result;
-use wombat::auth_server::run_auth_server;
+use wombat::auth::run_auth_server;
 
 #[tokio::main]
 async fn main() -> Result<()> {
