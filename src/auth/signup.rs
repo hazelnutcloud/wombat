@@ -1,12 +1,13 @@
 use std::{
     collections::HashSet,
-    env,
     sync::{Arc, Mutex},
 };
 
 use axum::{extract::State, response::Redirect};
 use rand::{distributions::Alphanumeric, Rng};
 use serenity::all::Permissions;
+
+use super::app::AppState;
 
 #[derive(Clone)]
 pub struct SignupManager {
@@ -32,19 +33,22 @@ impl SignupManager {
 
         digest
     }
+
+    pub fn consume_request(&self, digest: &str) -> bool {
+        let mut signup_requests = self.signup_requests.lock().unwrap();
+        signup_requests.remove(digest)
+    }
 }
 
-pub async fn handle_signup(State(signup_manager): State<SignupManager>) -> Redirect {
-    let digest = signup_manager.add_request();
-    let auth_url = get_auth_url(&digest);
+pub async fn handle_signup(State(app_state): State<AppState>) -> Redirect {
+    let digest = app_state.signup_manager.add_request();
+    let app_variables = app_state.app_variables;
+    let auth_url = get_auth_url(app_variables.client_id, app_variables.redirect_uri, digest);
 
     Redirect::to(&auth_url)
 }
 
-fn get_auth_url(digest: &str) -> String {
-    let client_id = env::var("DISCORD_CLIENT_ID").expect("DISCORD_CLIENT_ID not set");
-    let redirect_uri =
-        env::var("REDIRECT_URI").unwrap_or("http://localhost:8080/auth/redirect".into());
+fn get_auth_url(client_id: String, redirect_uri: String, digest: String) -> String {
     let permissions = Permissions::from_bits_truncate(
         Permissions::SEND_MESSAGES.bits()
             | Permissions::SEND_MESSAGES_IN_THREADS.bits()
@@ -52,10 +56,10 @@ fn get_auth_url(digest: &str) -> String {
     );
 
     format!(
-      "https://discord.com/oauth2/authorize?client_id={}&permissions={}&response_type=code&redirect_uri={}&integration_type=0&scope=identify+email+bot&state={}",
+      "https://discord.com/oauth2/authorize?client_id={}&permissions={}&response_type=code&redirect_uri={}&integration_type=0&scope=identify+bot&state={}",
       client_id,
       permissions.bits(),
       urlencoding::encode(&redirect_uri),
-      urlencoding::encode(digest)
+      urlencoding::encode(&digest)
     )
 }
