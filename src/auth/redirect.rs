@@ -62,7 +62,6 @@ pub async fn handle_redirect(
         guild,
     } = exchange_token(&app_state, &code).await?;
     let user = fetch_user_info(&app_state, &access_token).await?;
-    tracing::debug!("user:{user:?}");
 
     let mut db_conn = match app_state.db_pool.get() {
         Ok(db_conn) => db_conn,

@@ -55,7 +55,7 @@ async fn run_auth_server(
     let app = auth::app(db_pool, app_variables);
 
     let listener = TcpListener::bind(format!("{host}:{port}")).await?;
-    tracing::info!("🚀 Auth server running on http://{host}:{port}/auth/signup");
+    tracing::info!("🚀 Auth server running on http://{host}:{port}");
 
     axum::serve(listener, app).await
 }
