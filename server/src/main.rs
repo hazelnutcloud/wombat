@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{Context, Result};
 use diesel::{
     r2d2::{ConnectionManager, Pool},
     SqliteConnection,
@@ -9,20 +9,23 @@ use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 use wombat_server::{
     auth::{self, AppVariables},
+    tunnel::handle_conn,
     utils::DbPool,
 };
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    let host = env::var("HOST").unwrap_or("0.0.0.0".into());
-    let port = env::var("PORT").unwrap_or("8080".into());
+    let auth_host = env::var("AUTH_HOST").unwrap_or("0.0.0.0".into());
+    let auth_port = env::var("AUTH_PORT").unwrap_or("8080".into());
+    let tunneler_host = env::var("TUNNELER_HOST").unwrap_or("0.0.0.0".into());
+    let tunneler_port = env::var("TUNNELER_PORT").unwrap_or("9090".into());
     let client_id = env::var("DISCORD_CLIENT_ID").expect("DISCORD_CLIENT_ID not set");
     let client_secret = env::var("DISCORD_CLIENT_SECRET").expect("DISCORD_CLIENT_SECRET not set");
     let redirect_uri =
@@ -36,13 +39,12 @@ async fn main() -> anyhow::Result<()> {
     run_migrations(&db_pool);
 
     tokio::select! {
-      auth_server = run_auth_server(host, port, db_pool.clone(), AppVariables {
-        client_id,
-        client_secret,
-        redirect_uri,
-    }) => {
-        auth_server.context("failed to run auth server")
-      }
+      auth_server = run_auth_server(auth_host, auth_port, db_pool.clone(), AppVariables {
+          client_id,
+          client_secret,
+          redirect_uri,
+      }) => auth_server,
+      tunneler = run_tunneler(tunneler_host, tunneler_port, db_pool) => tunneler
     }
 }
 
@@ -51,17 +53,31 @@ async fn run_auth_server(
     port: String,
     db_pool: DbPool,
     app_variables: AppVariables,
-) -> std::io::Result<()> {
+) -> Result<()> {
     let app = auth::app(db_pool, app_variables);
 
     let listener = TcpListener::bind(format!("{host}:{port}")).await?;
     tracing::info!("🚀 Auth server running on http://{host}:{port}");
 
-    axum::serve(listener, app).await
+    axum::serve(listener, app)
+        .await
+        .context("failed to start auth server")
 }
 
 fn run_migrations(pool: &DbPool) {
     let mut conn = pool.get().unwrap();
     conn.run_pending_migrations(MIGRATIONS)
         .expect("failed to run migrations");
+}
+
+async fn run_tunneler(host: String, port: String, db_pool: DbPool) -> Result<()> {
+    let listener = TcpListener::bind(format!("{host}:{port}")).await?;
+
+    loop {
+        let (conn, _) = listener.accept().await?;
+
+        if let Err(e) = handle_conn(conn, db_pool.clone()).await {
+            tracing::error!("error handling client conn: {e}");
+        }
+    }
 }

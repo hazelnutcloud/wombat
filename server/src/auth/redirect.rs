@@ -1,4 +1,4 @@
-use crate::{models::*, utils};
+use crate::{models::*, protocol::KEY_WIDTH_BYTES, utils};
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -106,7 +106,7 @@ pub async fn handle_redirect(
                     .execute(conn)?;
             }
 
-            let secret_key = utils::generate_secret_key(32);
+            let secret_key = utils::generate_secret_key(KEY_WIDTH_BYTES);
             let key_hash = utils::hash_key(&secret_key);
 
             diesel::insert_into(secret_keys)
