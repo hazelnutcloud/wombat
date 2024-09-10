@@ -7,7 +7,7 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use std::env;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
-use wombat::{
+use wombat_server::{
     auth::{self, AppVariables},
     utils::DbPool,
 };

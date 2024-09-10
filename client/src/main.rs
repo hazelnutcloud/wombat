@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use wombat::config::{get_config, write_config, Cli};
+use wombat_client::config::{get_config, write_config, Cli};
 
 #[tokio::main]
 async fn main() -> Result<()> {
