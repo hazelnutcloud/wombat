@@ -60,7 +60,8 @@ pub fn write_config(config: &Config) -> Result<()> {
     Ok(())
 }
 
-pub fn get_config(cli: Cli) -> Result<(Config, bool)> {
+pub fn get_config() -> Result<(Config, bool)> {
+    let cli = Cli::parse();
     let mut write_config_file = false;
     let config = if let Some(config_path) = cli.config_file {
         let config_file = fs::read_to_string(config_path).context("Failed to read config file")?;
