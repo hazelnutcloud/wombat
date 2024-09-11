@@ -1,10 +1,10 @@
 use std::{env, fs, path::PathBuf};
 
+use anyhow::{Context, Result};
 use clap::{Args, Parser};
 use dialoguer::Input;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use anyhow::{Context, Result};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None, bin_name="wombat")]
@@ -20,16 +20,24 @@ pub struct Cli {
 #[group(multiple = true, conflicts_with = "config_file")]
 struct ConfigArgs {
     #[arg(short = 'u', long, name = "URL")]
-    server_url: Option<String>,
+    server_hostname: Option<String>,
 
     #[arg(short = 'k', long)]
     secret_key: Option<String>,
+
+    #[arg(long)]
+    auth_port: Option<u32>,
+
+    #[arg(long)]
+    tunnel_port: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
-    server_url: String,
-    secret_key: String,
+    pub server_hostname: String,
+    pub secret_key: String,
+    pub auth_port: u32,
+    pub tunnel_port: u32,
 }
 
 pub fn write_config(config: &Config) -> Result<()> {
@@ -58,10 +66,16 @@ pub fn get_config(cli: Cli) -> Result<(Config, bool)> {
         let config_file = fs::read_to_string(config_path).context("Failed to read config file")?;
         toml::from_str(&config_file).context("Failed to parse config file")?
     } else {
-        if cli.config_values.server_url.is_some() && cli.config_values.secret_key.is_some() {
+        if cli.config_values.server_hostname.is_some()
+            && cli.config_values.secret_key.is_some()
+            && cli.config_values.auth_port.is_some()
+            && cli.config_values.tunnel_port.is_some()
+        {
             Config {
                 secret_key: cli.config_values.secret_key.unwrap(),
-                server_url: cli.config_values.server_url.unwrap(),
+                server_hostname: cli.config_values.server_hostname.unwrap(),
+                auth_port: cli.config_values.auth_port.unwrap(),
+                tunnel_port: cli.config_values.tunnel_port.unwrap(),
             }
         } else {
             let existing_config_path = if let Some(path) = get_config_path() {
@@ -87,18 +101,34 @@ pub fn get_config(cli: Cli) -> Result<(Config, bool)> {
                     None
                 };
 
-            let server_url = if let Some(server_url) = cli.config_values.server_url {
-                server_url
+            if existing_config.is_none() {
+                write_config_file = true;
+            }
+
+            let server_hostname = if let Some(server_hostname) = cli.config_values.server_hostname {
+                server_hostname
             } else {
                 if let Some(existing_config) = existing_config.as_ref() {
-                    existing_config.server_url.clone()
+                    existing_config.server_hostname.clone()
                 } else {
-                    write_config_file = true;
                     Input::<String>::new()
-                        .default("http://localhost:8080".into())
-                        .with_prompt("Server URL ")
+                        .default("localhost".into())
+                        .with_prompt("Server hostname ")
                         .interact_text()?
-                        .trim_end_matches('/')
+                        .into()
+                }
+            };
+
+            let auth_port = if let Some(auth_port) = cli.config_values.auth_port {
+                auth_port
+            } else {
+                if let Some(existing_config) = existing_config.as_ref() {
+                    existing_config.auth_port
+                } else {
+                    Input::<u32>::new()
+                        .default(8080)
+                        .with_prompt("Server auth port ")
+                        .interact_text()?
                         .into()
                 }
             };
@@ -106,20 +136,34 @@ pub fn get_config(cli: Cli) -> Result<(Config, bool)> {
             let secret_key = if let Some(secret_key) = cli.config_values.secret_key {
                 secret_key
             } else {
-                if let Some(existing_config) = existing_config {
-                    existing_config.secret_key
+                if let Some(existing_config) = existing_config.as_ref() {
+                    existing_config.secret_key.clone()
                 } else {
-                    write_config_file = true;
-
-                    let signup_url = format!("{server_url}/auth/signup");
+                    let signup_url = format!("{server_hostname}:{auth_port}/auth/signup");
                     println!("Link your discord account at {signup_url} and enter your secret key");
                     Input::<String>::new().interact_text()?
                 }
             };
 
+            let tunnel_port = if let Some(tunnel_port) = cli.config_values.tunnel_port {
+                tunnel_port
+            } else {
+                if let Some(existing_config) = existing_config {
+                    existing_config.tunnel_port
+                } else {
+                    Input::<u32>::new()
+                        .default(9090)
+                        .with_prompt("Server tunnel port ")
+                        .interact_text()?
+                        .into()
+                }
+            };
+
             Config {
                 secret_key,
-                server_url,
+                server_hostname,
+                auth_port,
+                tunnel_port,
             }
         }
     };

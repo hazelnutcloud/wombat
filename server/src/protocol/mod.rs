@@ -25,10 +25,12 @@ impl PacketLength {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ServerPacket {
+    Hello(Hello),
     Error(WombatError),
-    Unauthorized
+    AuthSuccess,
+    Unauthorized,
 }
 
 impl ServerPacket {
@@ -37,7 +39,7 @@ impl ServerPacket {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum WombatError {
     ProtocolVersionMismatch { server_version: u8 },
     InvalidPacket,
@@ -49,9 +51,9 @@ pub enum ClientPacket {
     Auth([u8; KEY_WIDTH_BYTES]),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Hello {
-    protocol_version: u8,
+    pub protocol_version: u8,
 }
 
 impl Hello {

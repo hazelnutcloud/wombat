@@ -6,7 +6,7 @@ use tokio::{io::AsyncWriteExt, net::TcpStream};
 use crate::{
     models::SecretKey,
     protocol::{
-        read_auth, read_hello, ReadError, ServerPacket, WombatError, CURRENT_PROTO_VERSION,
+        read_auth, read_hello, Hello, ReadError, ServerPacket, WombatError, CURRENT_PROTO_VERSION,
     },
     utils::DbPool,
 };
@@ -21,8 +21,16 @@ pub async fn handle_conn(mut conn: TcpStream, db_pool: DbPool) -> Result<()> {
                     },
                 ))?)
                 .await?;
+                conn.write_all(b"\n").await?;
+                conn.flush().await?;
                 return Ok(());
             }
+            conn.write_all(&bincode::serialize(&ServerPacket::Hello(Hello {
+                protocol_version: CURRENT_PROTO_VERSION,
+            }))?)
+            .await?;
+            conn.write_all(b"\n").await?;
+            conn.flush().await?;
         }
         Err(e) => return handle_read_error(&mut conn, e).await,
     };
@@ -45,8 +53,15 @@ pub async fn handle_conn(mut conn: TcpStream, db_pool: DbPool) -> Result<()> {
             if key_found.is_empty() {
                 conn.write_all(&bincode::serialize(&ServerPacket::Unauthorized)?)
                     .await?;
+                conn.write_all(b"\n").await?;
+                conn.flush().await?;
                 return Ok(());
             }
+
+            conn.write_all(&bincode::serialize(&ServerPacket::AuthSuccess)?)
+                .await?;
+            conn.write_all(b"\n").await?;
+            conn.flush().await?;
 
             tracing::info!("auth successful");
         }
@@ -64,6 +79,8 @@ async fn handle_read_error(conn: &mut TcpStream, e: ReadError) -> Result<()> {
                 WombatError::InvalidPacket,
             ))?)
             .await?;
+            conn.write_all(b"\n").await?;
+            conn.flush().await?;
             return Ok(());
         }
     }
