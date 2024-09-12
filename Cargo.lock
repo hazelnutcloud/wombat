@@ -3133,6 +3133,7 @@ dependencies = [
  "serde",
  "tokio",
  "toml",
+ "tracing-subscriber",
  "url",
  "wombat-server",
 ]
@@ -3147,6 +3148,9 @@ dependencies = [
  "diesel",
  "diesel_migrations",
  "dotenvy",
+ "http-body-util",
+ "hyper 1.4.1",
+ "hyper-util",
  "rand",
  "reqwest 0.12.7",
  "serde",

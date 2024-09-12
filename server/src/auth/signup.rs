@@ -40,6 +40,12 @@ impl SignupManager {
     }
 }
 
+impl Default for SignupManager {
+    fn default() -> Self {
+        SignupManager::new()
+    }
+}
+
 pub async fn handle_signup(State(app_state): State<AppState>) -> Redirect {
     let digest = app_state.signup_manager.add_request();
     let app_variables = app_state.app_variables;

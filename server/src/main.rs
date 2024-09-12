@@ -9,7 +9,8 @@ use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 use wombat_server::{
     auth::{self, AppVariables},
-    tunnel::handle_conn,
+    connection::ConnectionHolder,
+    tunnel::handshake_client,
     utils::DbPool,
 };
 
@@ -38,13 +39,15 @@ async fn main() -> Result<()> {
 
     run_migrations(&db_pool);
 
+    let mut connection_holder = ConnectionHolder::new(db_pool.clone());
+
     tokio::select! {
       auth_server = run_auth_server(auth_host, auth_port, db_pool.clone(), AppVariables {
           client_id,
           client_secret,
           redirect_uri,
       }) => auth_server,
-      tunneler = run_tunneler(tunneler_host, tunneler_port, db_pool) => tunneler
+      tunneler = run_tunneler(tunneler_host, tunneler_port, db_pool, &mut connection_holder) => tunneler
     }
 }
 
@@ -70,14 +73,26 @@ fn run_migrations(pool: &DbPool) {
         .expect("failed to run migrations");
 }
 
-async fn run_tunneler(host: String, port: String, db_pool: DbPool) -> Result<()> {
+async fn run_tunneler(
+    host: String,
+    port: String,
+    db_pool: DbPool,
+    connection_holder: &mut ConnectionHolder,
+) -> Result<()> {
     let listener = TcpListener::bind(format!("{host}:{port}")).await?;
 
     loop {
-        let (conn, _) = listener.accept().await?;
+        let (mut conn, _) = listener.accept().await?;
 
-        if let Err(e) = handle_conn(conn, db_pool.clone()).await {
-            tracing::error!("error handling client conn: {e}");
+        match handshake_client(&mut conn, db_pool.clone()).await {
+            Ok(key_hash) => {
+                if let Err(e) = connection_holder.add_connection(key_hash, conn) {
+                    tracing::error!("error adding client conn: {e}");
+                };
+            }
+            Err(e) => {
+                tracing::error!("error handling client conn: {e}");
+            }
         }
     }
 }

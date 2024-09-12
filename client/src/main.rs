@@ -10,11 +10,15 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
 };
+use tracing_subscriber::filter::LevelFilter;
 use wombat_client::config::{get_config, write_config};
 use wombat_server::protocol::{ClientPacket, Hello, ServerPacket, CURRENT_PROTO_VERSION};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(LevelFilter::INFO)
+        .init();
     let (config, should_write_config) = get_config()?;
 
     if should_write_config {
@@ -24,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
     let mut conn =
         TcpStream::connect(format!("{}:{}", config.server_hostname, config.tunnel_port)).await?;
 
-    handshake(&mut conn, &config.secret_key).await?;
+    handshake_server(&mut conn, &config.secret_key).await?;
 
     let io = TokioIo::new(conn);
 
@@ -44,7 +48,7 @@ async fn relay_requests(
     http_client.request(request).await
 }
 
-async fn handshake(conn: &mut TcpStream, secret_key: &str) -> anyhow::Result<()> {
+async fn handshake_server(conn: &mut TcpStream, secret_key: &str) -> anyhow::Result<()> {
     conn.write_all(&bincode::serialize(&ClientPacket::Hello(Hello {
         protocol_version: CURRENT_PROTO_VERSION,
     }))?)

@@ -74,11 +74,9 @@ pub async fn read_client_packet(
 ) -> Result<ClientPacket, ReadError> {
     let mut buf: Vec<u8> = vec![0; buf_len];
 
-    conn.read_exact(&mut buf)
-        .await
-        .map_err(|e| ReadError::Io(e))?;
+    conn.read_exact(&mut buf).await.map_err(ReadError::Io)?;
 
-    bincode::deserialize(&buf).map_err(|e| ReadError::Deserialization(e))
+    bincode::deserialize(&buf).map_err(ReadError::Deserialization)
 }
 
 pub async fn read_hello(conn: &mut TcpStream) -> Result<Hello, ReadError> {

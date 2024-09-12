@@ -1,6 +1,7 @@
 pub mod auth;
-pub mod schema;
-pub mod utils;
+pub mod connection;
 pub mod models;
-pub mod tunnel;
 pub mod protocol;
+pub mod schema;
+pub mod tunnel;
+pub mod utils;
