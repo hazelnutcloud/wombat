@@ -35,22 +35,22 @@ pub async fn handshake_client(conn: &mut TcpStream, db_pool: DbPool) -> Result<S
         Err(e) => return Err(handle_read_error(conn, e).await.unwrap_err()),
     };
 
-    use crate::schema::secret_keys::dsl::*;
-
-    let key_hash = match read_auth(conn).await {
+    let user_id = match read_auth(conn).await {
         Ok(key) => {
+            use crate::schema::secret_keys::dsl::*;
             let mut db_conn = db_pool.get()?;
 
             let mut hasher = Sha256::new();
             hasher.update(key);
             let key_hash = format!("{:x}", hasher.finalize());
 
-            let key_found: Vec<SecretKey> = secret_keys
+            let key_found: Option<SecretKey> = secret_keys
                 .select(SecretKey::as_select())
                 .filter(secret_key_hash.eq(&key_hash))
-                .load(&mut db_conn)?;
+                .first(&mut db_conn)
+                .optional()?;
 
-            if key_found.is_empty() {
+            if key_found.is_none() {
                 conn.write_all(&bincode::serialize(&ServerPacket::Unauthorized)?)
                     .await?;
                 conn.write_all(b"\n").await?;
@@ -64,12 +64,13 @@ pub async fn handshake_client(conn: &mut TcpStream, db_pool: DbPool) -> Result<S
             conn.flush().await?;
 
             tracing::info!("auth successful");
-            key_hash
+
+            key_found.unwrap().user_id
         }
         Err(e) => return Err(handle_read_error(conn, e).await.unwrap_err()),
     };
 
-    Ok(key_hash)
+    Ok(user_id)
 }
 
 async fn handle_read_error(conn: &mut TcpStream, e: ReadError) -> Result<()> {

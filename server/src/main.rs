@@ -4,12 +4,18 @@ use diesel::{
     SqliteConnection,
 };
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use poise::{FrameworkOptions, PrefixFrameworkOptions};
+use serenity::all::GatewayIntents;
 use std::env;
-use tokio::net::TcpListener;
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::mpsc::Sender,
+};
 use tracing_subscriber::EnvFilter;
 use wombat_server::{
     auth::{self, AppVariables},
-    connection::ConnectionHolder,
+    connection::{DiscordFetchRequest, TunnelManager},
+    discord::{fetch, Data},
     tunnel::handshake_client,
     utils::DbPool,
 };
@@ -32,6 +38,7 @@ async fn main() -> Result<()> {
     let redirect_uri =
         env::var("REDIRECT_URI").unwrap_or("http://localhost:8080/auth/redirect".into());
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL not set");
+    let bot_token = env::var("DISCORD_BOT_TOKEN").expect("DISCORD_BOT_TOKEN not set");
 
     let db_pool = Pool::builder()
         .max_size(1)
@@ -39,7 +46,7 @@ async fn main() -> Result<()> {
 
     run_migrations(&db_pool);
 
-    let mut connection_holder = ConnectionHolder::new(db_pool.clone());
+    let (tunnel_manager, conn_tx, req_tx) = TunnelManager::new();
 
     tokio::select! {
       auth_server = run_auth_server(auth_host, auth_port, db_pool.clone(), AppVariables {
@@ -47,7 +54,9 @@ async fn main() -> Result<()> {
           client_secret,
           redirect_uri,
       }) => auth_server,
-      tunneler = run_tunneler(tunneler_host, tunneler_port, db_pool, &mut connection_holder) => tunneler
+      tunneler = run_tunneler(tunneler_host, tunneler_port, db_pool.clone(), conn_tx) => tunneler,
+      discord_bot = run_discord_bot(bot_token, req_tx, db_pool) => discord_bot,
+      tunnel_manager = tunnel_manager.run() => tunnel_manager
     }
 }
 
@@ -77,7 +86,7 @@ async fn run_tunneler(
     host: String,
     port: String,
     db_pool: DbPool,
-    connection_holder: &mut ConnectionHolder,
+    conn_tx: Sender<(String, TcpStream)>,
 ) -> Result<()> {
     let listener = TcpListener::bind(format!("{host}:{port}")).await?;
 
@@ -85,14 +94,47 @@ async fn run_tunneler(
         let (mut conn, _) = listener.accept().await?;
 
         match handshake_client(&mut conn, db_pool.clone()).await {
-            Ok(key_hash) => {
-                if let Err(e) = connection_holder.add_connection(key_hash, conn) {
-                    tracing::error!("error adding client conn: {e}");
-                };
+            Ok(user_id) => {
+                if let Err(e) = conn_tx.send((user_id, conn)).await {
+                    tracing::error!("error transmitting new conn: {e}")
+                }
             }
             Err(e) => {
                 tracing::error!("error handling client conn: {e}");
             }
         }
     }
+}
+
+async fn run_discord_bot(
+    bot_token: String,
+    req_tx: Sender<DiscordFetchRequest>,
+    db_pool: DbPool,
+) -> Result<()> {
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::DIRECT_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT;
+
+    let framework = poise::Framework::builder()
+        .options(FrameworkOptions {
+            commands: vec![fetch()],
+            prefix_options: PrefixFrameworkOptions {
+                prefix: Some("~".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .setup(|ctx, _, framework| {
+            Box::pin(async move {
+                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                Ok(Data { req_tx, db_pool })
+            })
+        })
+        .build();
+
+    let mut client = serenity::Client::builder(&bot_token, intents)
+        .framework(framework)
+        .await?;
+
+    client.start().await.map_err(|e| e.into())
 }

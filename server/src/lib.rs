@@ -5,3 +5,4 @@ pub mod protocol;
 pub mod schema;
 pub mod tunnel;
 pub mod utils;
+pub mod discord;

@@ -1,11 +1,13 @@
+use std::time::Duration;
+
 use anyhow::{bail, Context};
 use hyper::body::Incoming;
-use hyper::server::conn::http1;
+use hyper::server::conn::http2;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::client::legacy::{self, Client};
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
@@ -31,11 +33,17 @@ async fn main() -> anyhow::Result<()> {
     handshake_server(&mut conn, &config.secret_key).await?;
 
     let io = TokioIo::new(conn);
+    let exec = TokioExecutor::new();
 
     let http_client = Client::builder(TokioExecutor::new()).build_http();
 
-    http1::Builder::new()
-        .serve_connection(io, service_fn(|req| relay_requests(req, &http_client)))
+    http2::Builder::new(exec)
+        .keep_alive_interval(Some(Duration::from_secs(60)))
+        .timer(TokioTimer::new())
+        .serve_connection(
+            io,
+            service_fn(|req| relay_requests(req, http_client.clone())),
+        )
         .await?;
 
     Ok(())
@@ -43,9 +51,16 @@ async fn main() -> anyhow::Result<()> {
 
 async fn relay_requests(
     request: Request<Incoming>,
-    http_client: &Client<HttpConnector, Incoming>,
-) -> Result<Response<Incoming>, legacy::Error> {
-    http_client.request(request).await
+    http_client: Client<HttpConnector, Incoming>,
+) -> Result<Response<Incoming>, anyhow::Error> {
+    let (parts, body) = request.into_parts();
+    println!("{parts:?}");
+    let mut request = Request::builder()
+        .method(parts.method)
+        .uri(parts.uri)
+        .body(body)?;
+    *request.headers_mut() = parts.headers;
+    http_client.request(request).await.map_err(|e| e.into())
 }
 
 async fn handshake_server(conn: &mut TcpStream, secret_key: &str) -> anyhow::Result<()> {
