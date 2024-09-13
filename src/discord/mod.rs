@@ -1,17 +1,17 @@
-use crate::{connection::DiscordFetchRequest, utils::DbPool};
-
-use anyhow::bail;
 use axum::body::Bytes;
-use diesel::prelude::*;
 use http_body_util::{BodyExt, Full};
-use hyper::{Method, Request, Uri};
+use hyper::{body::Incoming, Method, Request, Response, Uri};
 use poise::command;
 use serde_json::Value;
 use tokio::sync::{mpsc::Sender, oneshot};
 
+pub type DiscordFetchRequest = (
+    Request<Full<Bytes>>,
+    oneshot::Sender<Result<Response<Incoming>, String>>,
+);
+
 pub struct Data {
     pub req_tx: Sender<DiscordFetchRequest>,
-    pub db_pool: DbPool,
 }
 
 type Error = anyhow::Error;
@@ -83,49 +83,20 @@ pub async fn fetch(
         })
         .body(body)?;
 
-    let user_id = match ctx.guild_id() {
-        Some(this_guild_id) => {
-            use crate::schema::discord_guilds::dsl::*;
-
-            let mut db_conn = { ctx.data().db_pool.get()? };
-
-            let user_id: Option<String> = discord_guilds
-                .select(manager_user_id)
-                .filter(guild_id.eq(this_guild_id.get().to_string()))
-                .first(&mut db_conn)
-                .optional()?;
-
-            match user_id {
-                Some(user_id) => user_id,
-                None => {
-                    ctx.reply("unexpected error occured :(").await?;
-                    bail!("Unexpected guild id not found in db: {this_guild_id}")
-                }
-            }
-        }
-        None => ctx.author().id.get().to_string(),
-    };
-
     let (req_tx, req_rx) = oneshot::channel();
 
     {
-        ctx.data().req_tx.send((user_id, request, req_tx)).await?;
+        ctx.data().req_tx.send((request, req_tx)).await?;
     }
 
     let response = req_rx.await?;
 
     let response = match response {
-        Some(response) => {
+        Ok(response) => {
             let body = response.collect().await?;
             String::from_utf8(body.to_bytes().to_vec())?
         }
-        None => {
-            return ctx
-                .reply("Wombat client not connected!")
-                .await
-                .and(Ok(()))
-                .map_err(|e| e.into())
-        }
+        Err(e) => return ctx.reply(e).await.and(Ok(())).map_err(|e| e.into()),
     };
 
     ctx.reply(response).await?;
