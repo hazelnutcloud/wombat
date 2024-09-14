@@ -11,6 +11,8 @@ dotenvy = "0.15.7"
 http-body-util = "0.1.2"
 hyper = { version = "1.4.1", features = ["full"] }
 hyper-util = { version = "0.1.8", features = ["full"] }
+jsonpath_lib = "0.3.0"
+mime = "0.3.17"
 poise = "0.6.1"
 serde = "1.0.210"
 serde_json = "1.0.128"

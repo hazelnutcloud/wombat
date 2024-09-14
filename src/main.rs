@@ -5,7 +5,7 @@ use serenity::all::GatewayIntents;
 use std::env;
 use tokio::sync::mpsc::{self, Sender};
 use tracing_subscriber::EnvFilter;
-use wombat::discord::{fetch, Data, DiscordFetchRequest};
+use wombat::discord::fetch::{fetch, Data, DiscordFetchRequest};
 
 #[tokio::main]
 async fn main() -> Result<()> {
